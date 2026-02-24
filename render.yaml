@@ -1,11 +1,10 @@
 services:
   - type: web
     name: katuotube
-    runtime: Dockerfile
+    runtime: docker # Dockerfileを使う場合は 'docker' と指定
     plan: free
-    buildCommand: pip install -r requirements.txt
-    # ファイル名が api/index.py の場合はこれ
-    startCommand: gunicorn api.index:app 
+    # Dockerfileを使う場合、build/startCommandは通常Dockerfile内で定義するため不要です
+    # もしDockerfileを使わずPythonランタイムを使うなら runtime: python にします
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.6
@@ -14,7 +13,7 @@ services:
       - key: RENDER
         value: "True"
       - key: APP_PASSWORD
-        sync: false
+        sync: false # 手動でRenderのダッシュボードから入力が必要
       - key: SESSION_SECRET
         generateValue: true
       - key: SECRET_KEY
