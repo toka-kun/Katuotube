@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ video_title }} - High Quality Mode</title>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <style>
+        body { background-color: #000; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .player-box { width: 100vw; height: 100vh; background: #000; display: flex; align-items: center; justify-content: center; }
+        #status-overlay {
+            position: absolute; top: 15px; left: 15px; color: #fff; background: rgba(0,0,0,0.5);
+            padding: 5px 10px; border-radius: 4px; z-index: 10; font-size: 12px; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="status-overlay">モード: <span id="current-phase">読み込み中...</span></div>
+
+    <div class="player-box">
+        <video id="vid" class="video-js vjs-default-skin vjs-big-play-centered" 
+               controls playsinline preload="auto" style="width:100%; height:100%;"></video>
+        <audio id="sync-audio" style="display:none;" preload="auto"></audio>
+    </div>
+
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script>
+        (function() {
+            const player = videojs('vid', {
+                autoplay: true,
+                playbackRates: [0.5, 1, 1.25, 1.5, 2]
+            });
+
+            const audio = document.getElementById('sync-audio');
+            const phaseText = document.getElementById('current-phase');
+            
+            const urls = {
+                videoSplit: "{{ video_url | safe }}",
+                audioSplit: "{{ audio_url | safe }}",
+                m3u8: "{{ m3u8_url | safe }}",
+                fallback: "{{ fallback_url | safe }}"
+            };
+
+            const preferredMode = "{{ preferred_mode }}"; 
+            let phase = 0; 
+
+            function updateStatus(text) {
+                phaseText.innerText = text;
+            }
+
+            function trySync() {
+                if (urls.videoSplit && urls.audioSplit && urls.videoSplit !== 'None') {
+                    updateStatus("高画質同期モード (1080p+)");
+                    player.src({ src: urls.videoSplit }); 
+                    audio.src = urls.audioSplit;
+                    setupSync();
+                    return true;
+                }
+                return false;
+            }
+
+            function tryHLS() {
+                if (urls.m3u8 && urls.m3u8 !== 'None') {
+                    updateStatus("HLSストリームモード");
+                    stopSync();
+                    player.src({ src: urls.m3u8, type: 'application/x-mpegURL' });
+                    return true;
+                }
+                return false;
+            }
+
+            function tryFallback() {
+                if (urls.fallback && urls.fallback !== 'None') {
+                    updateStatus("通常画質モード");
+                    stopSync();
+                    player.src({ src: urls.fallback, type: 'video/mp4' });
+                    return true;
+                }
+                updateStatus("再生可能なソースがありません");
+                return false;
+            }
+
+            function loadSource() {
+                if (preferredMode === 'sync') {
+                    if (!trySync()) if (!tryHLS()) tryFallback();
+                } else {
+                    if (!tryHLS()) if (!trySync()) tryFallback();
+                }
+            }
+
+            function setupSync() {
+                player.off('play'); player.on('play', () => audio.play().catch(()=>{}));
+                player.off('pause'); player.on('pause', () => audio.pause());
+                player.off('ratechange'); player.on('ratechange', () => audio.playbackRate = player.playbackRate());
+                
+                player.off('seeking'); player.on('seeking', () => {
+                    audio.pause();
+                    audio.currentTime = player.currentTime();
+                });
+
+                player.off('seeked'); player.on('seeked', () => {
+                    audio.currentTime = player.currentTime();
+                    if (!player.paused()) audio.play().catch(()=>{});
+                });
+
+                player.off('waiting'); player.on('waiting', () => audio.pause());
+                player.off('playing'); player.on('playing', () => audio.play().catch(()=>{}));
+
+                if (window.syncInterval) clearInterval(window.syncInterval);
+                window.syncInterval = setInterval(() => {
+                    if (!player.paused()) {
+                        const diff = Math.abs(player.currentTime() - audio.currentTime);
+                        if (diff > 0.2) audio.currentTime = player.currentTime();
+                    }
+                }, 1000);
+            }
+
+            function stopSync() {
+                if (window.syncInterval) clearInterval(window.syncInterval);
+                audio.pause();
+                audio.src = "";
+            }
+
+            player.on('error', function() {
+                phase++;
+                if (phase === 1) {
+                    if (preferredMode === 'sync') tryHLS() || tryFallback();
+                    else trySync() || tryFallback();
+                } else {
+                    tryFallback();
+                }
+            });
+
+            loadSource();
+        })();
+    </script>
+</body>
+</html>
