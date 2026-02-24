@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ログイン - かつおTube</title>
+    <style>
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.22);
+            --glass-border: rgba(255, 255, 255, 0.45);
+            --glass-inner: rgba(255, 255, 255, 0.65);
+            --text-main: #ffffff;
+            --text-sub: #e0f2fe;
+            --accent: #0077be;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            /* かつおTubeのブランドカラーを基調にしたグラデーション背景 */
+            background:
+                radial-gradient(1200px at 10% 10%, #00aaff, transparent 40%),
+                radial-gradient(1200px at 90% 90%, #0077be, transparent 40%),
+                linear-gradient(135deg, #0077be 0%, #00aaff 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* =========================
+           Glass Container
+        ========================= */
+        .container {
+            position: relative;
+            width: 100%;
+            max-width: 360px;
+            padding: 40px 30px;
+            border-radius: 28px;
+            background: linear-gradient(
+                135deg,
+                rgba(255, 255, 255, 0.3),
+                rgba(255, 255, 255, 0.1)
+            );
+            backdrop-filter: blur(20px) saturate(160%);
+            -webkit-backdrop-filter: blur(20px) saturate(160%);
+            border: 1px solid var(--glass-border);
+            box-shadow:
+                0 25px 50px rgba(0, 0, 0, 0.15),
+                inset 0 1px 0 var(--glass-inner);
+            text-align: center;
+            transform-style: preserve-3d;
+        }
+
+        /* ログイン成功時の消滅アニメーション */
+        .container.melt {
+            animation: meltOut 0.85s ease forwards;
+        }
+
+        @keyframes meltOut {
+            to {
+                opacity: 0;
+                filter: blur(22px);
+                transform: scale(1.1);
+            }
+        }
+
+        /* =========================
+           Header & Icon
+        ========================= */
+        .icon {
+            font-size: 3.5rem;
+            margin-bottom: 10px;
+            filter: drop-shadow(0 4px 10px rgba(0,0,0,0.1));
+        }
+
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 28px;
+            font-weight: 800;
+            color: #fff;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .subtitle {
+            margin-bottom: 30px;
+            color: var(--text-sub);
+            font-size: 14px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        /* =========================
+           Input
+        ========================= */
+        input[type="password"] {
+            width: 100%;
+            padding: 14px 18px;
+            margin-bottom: 20px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            font-size: 16px;
+            outline: none;
+            transition: all 0.3s;
+            color: #333;
+        }
+
+        input[type="password"]::placeholder {
+            color: #888;
+        }
+
+        input[type="password"]:focus {
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.2);
+        }
+
+        /* =========================
+           Stretch Button
+        ========================= */
+        button {
+            width: 100%;
+            padding: 15px;
+            border-radius: 999px;
+            border: none;
+            font-size: 16px;
+            font-weight: 800;
+            color: #0077be;
+            cursor: pointer;
+            background: #fff;
+            box-shadow:
+                0 10px 20px rgba(0, 0, 0, 0.1);
+            transform-origin: center;
+            transition:
+                transform 0.18s cubic-bezier(.34,1.56,.64,1),
+                box-shadow 0.18s ease,
+                background 0.3s;
+        }
+
+        button:hover {
+            background: #f0f9ff;
+        }
+
+        /* 離したときのバウンドアニメーション */
+        button.release {
+            animation: bounceBack 0.4s cubic-bezier(.34,1.56,.64,1);
+        }
+
+        @keyframes bounceBack {
+            0%   { transform: scale(1.15, 0.9); }
+            60%  { transform: scale(0.96, 1.04); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="loginCard">
+    <div class="icon">🐟</div>
+    <h1>かつおTube</h1>
+    <p class="subtitle">best youtube viewer</p>
+
+    <form method="POST" id="loginForm">
+        <input 
+            type="password" 
+            name="password" 
+            placeholder="合言葉を入力" 
+            required 
+            autofocus
+        >
+        <button id="stretchBtn" type="submit">ログイン</button>
+    </form>
+</div>
+
+<script>
+/* =========================
+   指・マウス追従ストレッチ
+========================= */
+const btn = document.getElementById("stretchBtn");
+const loginCard = document.getElementById("loginCard");
+const loginForm = document.getElementById("loginForm");
+
+let isPressing = false;
+
+function stretch(x, y) {
+    const rect = btn.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    const dx = (x - cx) / rect.width;
+    const dy = (y - cy) / rect.height;
+
+    const scaleX = 1 + Math.min(Math.abs(dx), 0.35);
+    const scaleY = 1 - Math.min(Math.abs(dy), 0.25);
+
+    btn.style.transform = `scale(${scaleX}, ${scaleY})`;
+}
+
+btn.addEventListener("pointerdown", e => {
+    isPressing = true;
+    btn.setPointerCapture(e.pointerId);
+});
+
+btn.addEventListener("pointermove", e => {
+    if (!isPressing) return;
+    stretch(e.clientX, e.clientY);
+});
+
+btn.addEventListener("pointerup", e => {
+    isPressing = false;
+    btn.releasePointerCapture(e.pointerId);
+    btn.style.transform = "scale(1)";
+    btn.classList.remove("release");
+    void btn.offsetWidth; // リフロー発生
+    btn.classList.add("release");
+});
+
+btn.addEventListener("pointercancel", () => {
+    isPressing = false;
+    btn.style.transform = "scale(1)";
+});
+
+/* =========================
+   送信時のエフェクト
+========================= */
+loginForm.addEventListener("submit", (e) => {
+    // 実際のアニメーションを見せるために少し遅延させる場合はここを調整
+    // ここでは単純にコンテナを消すエフェクトを付与
+    loginCard.classList.add("melt");
+});
+</script>
+
+</body>
+</html>
