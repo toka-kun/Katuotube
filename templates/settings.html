@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .settings-container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .settings-header {
+        border-bottom: 2px solid var(--main);
+        margin-bottom: 25px;
+        padding-bottom: 10px;
+    }
+    .settings-section {
+        margin-bottom: 30px;
+    }
+    .settings-section h3 {
+        font-size: 1.2rem;
+        margin-bottom: 15px;
+        color: #333;
+    }
+    .setting-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .setting-info {
+        flex: 1;
+    }
+    .setting-info label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 5px;
+        cursor: pointer;
+    }
+    .setting-info p {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #666;
+    }
+
+    /* スイッチのスタイル */
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 26px;
+    }
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: .4s;
+        border-radius: 34px;
+    }
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+    input:checked + .slider {
+        background-color: var(--main);
+    }
+    input:checked + .slider:before {
+        transform: translateX(24px);
+    }
+
+    .btn-danger {
+        padding: 10px 20px;
+        background: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+    .btn-danger:hover { background: #cc0000; }
+
+    select {
+        padding: 8px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+        background: #f9f9f9;
+        cursor: pointer;
+    }
+</style>
+
+<div class="settings-container">
+    <div class="settings-header">
+        <h2><i class="fas fa-cog"></i> 設定</h2>
+        <p>「かつおTube」の使い心地をカスタマイズします。</p>
+    </div>
+
+    <div class="settings-section">
+        <h3>表示</h3>
+        <div class="setting-item">
+            <div class="setting-info">
+                <label for="dark-mode-toggle">ダークモード</label>
+                <p>画面の配色を暗くして、目への負担を軽減します。</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="dark-mode-toggle" onchange="toggleDarkMode()">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <h3>再生設定</h3>
+        <div class="setting-item">
+            <div class="setting-info">
+                <label for="player-mode-select">優先再生モード</label>
+                <p>高画質再生時に使用するエンジンを選択します。</p>
+            </div>
+            <select id="player-mode-select" onchange="updatePlayerMode()">
+                <option value="hls">HLS (ストリーミング)</option>
+                <option value="sync">合成同期 (最高画質追求)</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <h3>プライバシー</h3>
+        <div class="setting-item">
+            <div class="setting-info">
+                <label for="save-history-toggle">再生履歴を保存する</label>
+                <p>視聴した動画を履歴ページに記録します。</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="save-history-toggle" onchange="toggleSaveHistory()">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="setting-item">
+            <div class="setting-info">
+                <label>再生履歴のリセット</label>
+                <p>保存されているすべての履歴を消去します。</p>
+            </div>
+            <button class="btn-danger" onclick="resetHistory()">履歴を削除</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.onload = function() {
+        const isDarkMode = localStorage.getItem('dark_mode') === 'enabled';
+        document.getElementById('dark-mode-toggle').checked = isDarkMode;
+        
+        const saveHistory = localStorage.getItem('save_history') !== 'disabled';
+        document.getElementById('save-history-toggle').checked = saveHistory;
+
+        const playerMode = localStorage.getItem('player_mode') || 'hls';
+        document.getElementById('player-mode-select').value = playerMode;
+    };
+
+    function toggleDarkMode() {
+        const isChecked = document.getElementById('dark-mode-toggle').checked;
+        if (isChecked) {
+            localStorage.setItem('dark_mode', 'enabled');
+            alert("ダークモードを有効にしました（反映には共通CSSの設定が必要です）");
+        } else {
+            localStorage.setItem('dark_mode', 'disabled');
+            alert("ダークモードを無効にしました");
+        }
+    }
+
+    function updatePlayerMode() {
+        const mode = document.getElementById('player-mode-select').value;
+        localStorage.setItem('player_mode', mode);
+        document.cookie = "player_mode=" + mode + ";path=/;max-age=31536000";
+    }
+
+    function toggleSaveHistory() {
+        const isChecked = document.getElementById('save-history-toggle').checked;
+        localStorage.setItem('save_history', isChecked ? 'enabled' : 'disabled');
+    }
+
+    function resetHistory() {
+        if (confirm('本当にすべての再生履歴を削除しますか？この操作は取り消せません。')) {
+            localStorage.removeItem('watch_history');
+            alert('履歴を削除しました。');
+        }
+    }
+</script>
+{% endblock %}
