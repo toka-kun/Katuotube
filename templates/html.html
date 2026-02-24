@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .html-container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+    .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+    .input-group input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 8px; outline: none; }
+    .btn-fetch { padding: 0 20px; background: var(--main); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    
+    /* プロキシアニメーション */
+    .proxy-viz { display: none; justify-content: space-around; align-items: center; margin: 30px 0; padding: 20px; background: #f0f4f8; border-radius: 10px; }
+    .node { text-align: center; font-size: 0.8rem; color: #666; }
+    .node i { font-size: 2rem; color: var(--main); display: block; margin-bottom: 5px; }
+    .arrow { font-size: 1.5rem; color: #ccc; position: relative; }
+    .dot { position: absolute; width: 8px; height: 8px; background: var(--main); border-radius: 50%; top: 50%; transform: translateY(-50%); left: 0; }
+    
+    @keyframes moveRight { 0% { left: 0; } 100% { left: 100%; } }
+    .animating .dot { animation: moveRight 1s infinite linear; }
+
+    pre { background: #272822; color: #f8f8f2; padding: 20px; border-radius: 8px; overflow-x: auto; max-height: 500px; font-size: 0.85rem; white-space: pre-wrap; display: none; }
+    
+    /* 追加：アクションボタンのスタイル */
+    .action-bar { display: none; gap: 10px; margin: 10px 0; justify-content: flex-end; }
+    .btn-action { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; font-weight: bold; display: flex; align-items: center; gap: 5px; }
+    .btn-copy { background: #6c757d; color: white; }
+    .btn-run { background: #28a745; color: white; }
+</style>
+
+<div class="html-container">
+    <h2><i class="fas fa-network-wired"></i> Proxy HTML取得</h2>
+    <p>サーバーを経由して安全にサイトのソースを取得します。</p>
+
+    <div class="input-group">
+        <input type="text" id="target-url" placeholder="https://example.com" value="https://">
+        <button class="btn-fetch" onclick="fetchWithProxy()">Proxy取得</button>
+    </div>
+
+    <div class="proxy-viz" id="proxy-viz">
+        <div class="node"><i class="fas fa-laptop"></i>あなた</div>
+        <div class="arrow" id="arrow1"><div class="dot"></div><i class="fas fa-long-arrow-alt-right"></i></div>
+        <div class="node"><i class="fas fa-server"></i>かつおProxy</div>
+        <div class="arrow" id="arrow2"><div class="dot"></div><i class="fas fa-long-arrow-alt-right"></i></div>
+        <div class="node"><i class="fas fa-globe"></i>対象サイト</div>
+    </div>
+
+    <div id="status" style="text-align:center; margin-bottom:10px; font-weight:bold;"></div>
+
+    <div class="action-bar" id="action-bar">
+        <button class="btn-action btn-copy" onclick="copyHtml()"><i class="fas fa-copy"></i> コピー</button>
+        <button class="btn-action btn-run" onclick="runHtml()"><i class="fas fa-play"></i> 実行 (about:blank)</button>
+    </div>
+
+    <pre id="html-display"></pre>
+</div>
+
+<script>
+let fetchedHtml = ""; // 取得したHTMLを保持する変数
+
+async function fetchWithProxy() {
+    const url = document.getElementById('target-url').value;
+    const viz = document.getElementById('proxy-viz');
+    const display = document.getElementById('html-display');
+    const status = document.getElementById('status');
+    const arrow1 = document.getElementById('arrow1');
+    const arrow2 = document.getElementById('arrow2');
+    const actionBar = document.getElementById('action-bar');
+
+    if (!url || url === "https://") return alert("URLを入力してください");
+
+    // リセット
+    display.style.display = 'none';
+    actionBar.style.display = 'none';
+    viz.style.display = 'flex';
+    status.innerText = "Proxyリクエスト送信中...";
+    status.style.color = "inherit";
+    arrow1.classList.add('animating');
+    arrow2.classList.remove('animating');
+
+    try {
+        await new Promise(r => setTimeout(r, 800));
+        arrow2.classList.add('animating');
+        status.innerText = "対象サイトからデータを取得中...";
+
+        const res = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
+        const data = await res.json();
+
+        if (data.html) {
+            fetchedHtml = data.html;
+            status.innerText = "✅ 取得完了！";
+            status.style.color = "green";
+            display.innerText = data.html;
+            display.style.display = 'block';
+            actionBar.style.display = 'flex';
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (e) {
+        status.innerText = "❌ エラー: " + e.message;
+        status.style.color = "red";
+    } finally {
+        arrow1.classList.remove('animating');
+        arrow2.classList.remove('animating');
+    }
+}
+
+// コピー機能
+function copyHtml() {
+    navigator.clipboard.writeText(fetchedHtml).then(() => {
+        alert("クリップボードにコピーしました！");
+    });
+}
+
+// 実行機能 (about:blank)
+function runHtml() {
+    const win = window.open('about:blank', '_blank');
+    win.document.open();
+    win.document.write(fetchedHtml);
+    win.document.close();
+}
+</script>
+{% endblock %}
