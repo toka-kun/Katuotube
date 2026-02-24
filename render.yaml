@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: katuotube
+    runtime: Dockerfile
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # ファイル名が api/index.py の場合はこれ
+    startCommand: gunicorn api.index:app 
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.6
+      - key: FLASK_ENV
+        value: production
+      - key: RENDER
+        value: "True"
+      - key: APP_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
