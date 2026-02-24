@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+
+{% block title %}{{ video.title if video else '動画' }} - かつおTube{% endblock %}
+
+{% block content %}
+<div class="watch-layout">
+    <div class="watch-main">
+        <div class="player-container">
+            <div id="player-wrapper" class="player-wrapper">
+                <video id="player" controls autoplay playsinline 
+                       poster="/proxy/thumb?v={{ video_id or video.videoId }}"></video>
+                
+                <iframe id="embed-player" style="display:none; width:100%; height:100%; border:none;" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                        allowfullscreen></iframe>
+                
+                <div id="player-error-overlay" class="error-overlay" style="display:none;">
+                    <div class="error-content">
+                        <div class="loader"></div>
+                        <p id="error-message">動画を読み込めません。代替ソースを試行中...</p>
+                    </div>
+                </div>
+
+                <div id="fatal-error-ui" class="player-error" style="display:none;">
+                    <div class="error-content">
+                        <span class="error-icon">⚠️</span>
+                        <h3>再生できませんでした</h3>
+                        <p>埋め込みモードまたは別のブラウザをお試しください</p>
+                        <div class="error-actions">
+                            <button onclick="changeMode('embed')" class="error-btn">🔗 埋め込みモードに切替</button>
+                            <a href="/" class="error-btn" style="background:#444;">ホームに戻る</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="video-info">
+            <h1 class="video-title">{{ video.title }}</h1>
+            
+            <div class="video-actions">
+                <div class="channel-area">
+                    <div class="channel-icon-wrapper">
+                        {% if video.authorThumbnails %}
+                        <img src="{{ video.authorThumbnails[-1].url }}" class="channel-icon-img" alt="{{ video.author }}">
+                        {% else %}
+                        <div class="channel-icon-placeholder">{{ video.author[0] if video.author else '🐟' }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="channel-text">
+                        <div class="author-name">{{ video.author }}</div>
+                        <div class="sub-count">{{ video.subCountText or "チャンネル登録者数非公開" }}</div>
+                    </div>
+                </div>
+                
+                <div class="mode-selector">
+                    {% if sources.high %}<button onclick="changeMode('high')" id="btn-high" class="yt-btn">高画質(720p)</button>{% endif %}
+                    <button onclick="changeMode('m3u8')" id="btn-m3u8" class="yt-btn">通常(HLS)</button>
+                    <button onclick="changeMode('primary')" id="btn-primary" class="yt-btn">軽量(MP4)</button>
+                    <button onclick="changeMode('embed')" ondblclick="showEmbedSelector()" id="btn-embed" class="yt-btn" title="ダブルクリックでソース切替">埋め込み</button>
+                </div>
+            </div>
+
+            <div class="description-box">
+                <div class="description-meta">
+                    {{ video.viewCountText }} • {{ video.publishedText }}
+                </div>
+                <div class="description-content" id="description">
+                    {{ video.descriptionHtml | safe }}
+                </div>
+            </div>
+
+            <div class="comments-section">
+                <h3 class="comments-count">コメント {{ comments|length }} 件</h3>
+                <div class="comments-list">
+                    {% for comment in comments %}
+                    <div class="comment-item">
+                        <img src="{{ comment.authorThumbnails[-1].url if comment.authorThumbnails else '' }}" class="comment-author-icon" loading="lazy">
+                        <div class="comment-body">
+                            <div class="comment-header">
+                                <span class="comment-author">{{ comment.author }}</span>
+                                <span class="comment-date">{{ comment.publishedText }}</span>
+                            </div>
+                            <div class="comment-text">{{ comment.contentHtml | safe }}</div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="no-comments">コメントはありません</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="watch-sidebar">
+        <h3 class="sidebar-title">関連動画</h3>
+        <div class="related-list">
+            {% for rel in video.recommendedVideos %}
+            <a href="/watch?v={{ rel.videoId }}" class="related-item">
+                <div class="rel-thumb">
+                    <img src="/proxy/thumb?v={{ rel.videoId }}" loading="lazy">
+                    <span class="rel-duration">{{ rel.lengthText | default('', true) }}</span>
+                </div>
+                <div class="rel-info">
+                    <div class="rel-title">{{ rel.title }}</div>
+                    <div class="rel-author">{{ rel.author }}</div>
+                    <div class="rel-meta">{{ rel.viewCountText }}</div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div id="embed-selector-modal" class="modal-overlay" style="display:none;" onclick="closeEmbedSelector()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3>埋め込みソースの切り替え</h3>
+            <button class="close-x" onclick="closeEmbedSelector()">×</button>
+        </div>
+        <div class="modal-body">
+            <p class="modal-desc">再生できない場合はソースを変更してください。</p>
+            <div class="option-list">
+                <label class="option-item" onclick="setEmbedSource('nocookie')">
+                    <input type="radio" name="embed_source" id="opt-nocookie" checked>
+                    <div class="option-info">
+                        <span class="option-title">YouTube No-Cookie (推奨)</span>
+                        <span class="option-sub">広告なし・プライバシー強化版</span>
+                    </div>
+                    <div class="check-mark"></div>
+                </label>
+                <label class="option-item" onclick="setEmbedSource('education')">
+                    <input type="radio" name="embed_source" id="opt-education">
+                    <div class="option-info">
+                        <span class="option-title">YouTube Education</span>
+                        <span class="option-sub">学校・教育用ネットワーク向け</span>
+                    </div>
+                    <div class="check-mark"></div>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeEmbedSelector()" class="modal-close-btn">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script>
+    const videoPlayer = document.getElementById('player');
+    const embedPlayer = document.getElementById('embed-player');
+    const errorOverlay = document.getElementById('player-error-overlay');
+    const fatalUI = document.getElementById('fatal-error-ui');
+    const errorMsg = document.getElementById('error-message');
+    
+    const sources = { 
+        high: '{{ sources.high | safe }}',
+        m3u8: '{{ sources.m3u8 | safe }}', 
+        primary: '{{ sources.primary | safe }}',
+        embed: '{{ sources.embed | safe }}',
+        education: '{{ sources.education | safe }}'
+    };
+    
+    let hls = null;
+    let retryCount = 0;
+    const maxRetries = 2;
+    let isChangingMode = false;
+
+    // モーダル操作
+    function showEmbedSelector() {
+        document.getElementById('embed-selector-modal').style.display = 'flex';
+    }
+    function closeEmbedSelector() {
+        document.getElementById('embed-selector-modal').style.display = 'none';
+    }
+    function setEmbedSource(type) {
+        if (type === 'education') {
+            sources.embed = sources.education;
+            document.getElementById('opt-education').checked = true;
+        } else {
+            sources.embed = `https://www.youtube-nocookie.com/embed/{{ video_id or video.videoId }}?autoplay=1`;
+            document.getElementById('opt-nocookie').checked = true;
+        }
+        changeMode('embed');
+        setTimeout(closeEmbedSelector, 300);
+    }
+
+    function changeMode(mode) {
+        if (isChangingMode) return;
+        isChangingMode = true;
+        console.log("Switching to mode:", mode);
+        
+        document.querySelectorAll('.yt-btn').forEach(b => b.classList.remove('active'));
+        const btn = document.getElementById('btn-' + mode);
+        if(btn) btn.classList.add('active');
+
+        const url = sources[mode];
+
+        if (hls) {
+            hls.detachMedia();
+            hls.destroy();
+            hls = null;
+        }
+
+        if (mode === 'm3u8') {
+            videoPlayer.pause();
+            videoPlayer.src = "";
+            videoPlayer.load();
+            videoPlayer.style.display = 'none';
+            embedPlayer.style.display = 'block';
+            embedPlayer.src = `/high?v={{ video_id or video.videoId }}`;
+            errorOverlay.style.display = 'none';
+            fatalUI.style.display = 'none';
+            isChangingMode = false;
+            return;
+        }
+
+        if (mode === 'embed') {
+            videoPlayer.pause();
+            videoPlayer.src = "";
+            videoPlayer.style.display = 'none';
+            embedPlayer.style.display = 'block';
+            embedPlayer.src = url;
+            isChangingMode = false;
+            return;
+        } else {
+            videoPlayer.style.display = 'block';
+            embedPlayer.style.display = 'none';
+            embedPlayer.src = '';
+        }
+
+        videoPlayer.pause();
+        videoPlayer.removeAttribute('src');
+        videoPlayer.load();
+
+        if (mode === 'high') {
+            if (Hls.isSupported()) {
+                hls = new Hls({ 
+                    maxBufferLength: 30,
+                    manifestLoadingMaxRetry: 3,
+                    manifestLoadingRetryDelay: 1000,
+                    enableWorker: true
+                });
+                hls.loadSource(url);
+                hls.attachMedia(videoPlayer);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    videoPlayer.play()
+                        .catch(() => console.log("Autoplay prevented."))
+                        .finally(() => { isChangingMode = false; });
+                });
+                hls.on(Hls.Events.ERROR, (e, data) => {
+                    if (data.fatal) {
+                        isChangingMode = false;
+                        handleAutoRetry();
+                    }
+                });
+            } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                videoPlayer.src = url;
+                videoPlayer.addEventListener('loadedmetadata', () => {
+                    videoPlayer.play()
+                        .catch(() => {})
+                        .finally(() => { isChangingMode = false; });
+                }, { once: true });
+            } else {
+                isChangingMode = false;
+                changeMode('primary');
+            }
+        } else if (url && url !== 'None' && url !== '') {
+            videoPlayer.src = url;
+            videoPlayer.play()
+                .catch(e => console.log("Playback failed"))
+                .finally(() => { isChangingMode = false; });
+        } else {
+            isChangingMode = false;
+        }
+    }
+
+    function handleAutoRetry() {
+        if (retryCount < maxRetries) {
+            retryCount++;
+            errorOverlay.style.display = 'flex';
+            errorMsg.innerText = `読み込みエラー... 再試行中 (${retryCount}/${maxRetries})`;
+            
+            setTimeout(() => {
+                errorOverlay.style.display = 'none';
+                if (retryCount === 1) changeMode('primary');
+                else changeMode('m3u8');
+            }, 2000);
+        } else {
+            showFatalError();
+        }
+    }
+
+    function showFatalError() {
+        errorOverlay.style.display = 'none';
+        fatalUI.style.display = 'flex';
+        videoPlayer.style.display = 'none';
+        isChangingMode = false;
+    }
+
+    videoPlayer.onerror = () => {
+        if (!isChangingMode && videoPlayer.src && videoPlayer.src !== location.href && !videoPlayer.src.endsWith('/None')) {
+            handleAutoRetry();
+        }
+    };
+
+    window.onload = () => {
+        if (localStorage.getItem('save_history') !== 'disabled') {
+            const historyData = {
+                title: "{{ video.title | escape }}",
+                thumbnail: "/proxy/thumb?v={{ video_id or video.videoId }}",
+                date: new Date().toLocaleString(),
+                id: "{{ video_id or video.videoId }}"
+            };
+            let history = JSON.parse(localStorage.getItem('watch_history') || '[]');
+            history = history.filter(item => item.id !== historyData.id);
+            history.push(historyData);
+            if (history.length > 50) { history.shift(); }
+            localStorage.setItem('watch_history', JSON.stringify(history));
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const forcedMode = urlParams.get('mode');
+        
+        if (forcedMode && sources[forcedMode]) {
+            changeMode(forcedMode);
+        } else {
+            const initialMode = sources.high && sources.high !== 'None' ? 'high' : (sources.m3u8 && sources.m3u8 !== 'None' ? 'm3u8' : (sources.primary && sources.primary !== 'None' ? 'primary' : 'embed'));
+            changeMode(initialMode);
+        }
+    };
+</script>
+
+<style>
+    .watch-layout { display: flex; flex-wrap: wrap; gap: 24px; max-width: 1400px; margin: 0 auto; padding: 20px; font-family: 'Roboto', Arial, sans-serif; background: transparent; color: inherit; }
+    .watch-main { flex: 3; min-width: 360px; }
+    .watch-sidebar { flex: 1.2; min-width: 300px; }
+
+    .player-container { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .player-wrapper { width: 100%; height: 100%; position: relative; }
+    #player, #embed-player { width: 100%; height: 100%; border-radius: 12px; }
+
+    .error-overlay, .player-error { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15,15,15,0.95); color: white; display: flex; align-items: center; justify-content: center; z-index: 20; text-align: center; }
+    .error-btn { padding: 10px 20px; background: #f00; color: #fff; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; margin: 5px; }
+    
+    .loader { border: 3px solid rgba(255,255,255,0.2); border-top: 3px solid #fff; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.8s linear infinite; margin: 0 auto 15px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .video-title { font-size: 1.3rem; font-weight: 800; margin: 15px 0 10px; line-height: 1.4; color: var(--text-color, #0f0f0f); }
+    .video-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
+    
+    .channel-area { display: flex; align-items: center; gap: 12px; }
+    .channel-icon-wrapper { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: #eee; }
+    .channel-icon-img { width: 100%; height: 100%; object-fit: cover; }
+    .channel-icon-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #f000; color: #333; font-weight: bold; }
+    [data-theme="dark"] .channel-icon-placeholder { background: #333; color: #fff; }
+
+    .mode-selector { display: flex; gap: 8px; flex-wrap: wrap; }
+    .yt-btn { padding: 8px 16px; border-radius: 18px; border: none; background: rgba(0,0,0,0.05); cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: 0.2s; }
+    [data-theme="dark"] .yt-btn { background: rgba(255,255,255,0.1); color: #fff; }
+    .yt-btn:hover { background: rgba(0,0,0,0.1); }
+    .yt-btn.active { background: #0f0f0f; color: #fff; }
+    [data-theme="dark"] .yt-btn.active { background: #fff; color: #0f0f0f; }
+
+    .description-box { background: rgba(0,0,0,0.05); border-radius: 12px; padding: 12px; margin-bottom: 24px; }
+    [data-theme="dark"] .description-box { background: rgba(255,255,255,0.1); }
+    .description-content { font-size: 0.95rem; line-height: 1.6; margin-top: 8px; overflow-wrap: break-word; }
+
+    .comments-section { margin-top: 32px; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 24px; }
+    [data-theme="dark"] .comments-section { border-top: 1px solid rgba(255,255,255,0.1); }
+    .comments-count { font-size: 1.1rem; margin-bottom: 20px; }
+    .comment-item { display: flex; gap: 16px; margin-bottom: 24px; }
+    .comment-author-icon { width: 40px; height: 40px; border-radius: 50%; background: #eee; flex-shrink: 0; }
+    .comment-header { margin-bottom: 4px; font-size: 0.85rem; }
+    .comment-author { font-weight: bold; margin-right: 8px; }
+    .comment-date { color: #606060; }
+    [data-theme="dark"] .comment-date { color: #aaa; }
+    .comment-text { font-size: 0.95rem; line-height: 1.4; overflow-wrap: break-word; }
+
+    .related-item { display: flex; gap: 12px; text-decoration: none; color: inherit; margin-bottom: 12px; transition: 0.2s; }
+    .rel-thumb { position: relative; flex: 0 0 168px; aspect-ratio: 16/9; border-radius: 8px; overflow: hidden; background: #000; }
+    .rel-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .rel-duration { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.8); color: #fff; font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; }
+    .rel-title { font-size: 0.95rem; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .rel-author { font-size: 0.8rem; color: #606060; margin-top: 4px; }
+
+    /* モーダル用追加スタイル（見やすさ重視） */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+    .modal-content { background: #fff; width: 90%; max-width: 450px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden; animation: fadeIn 0.2s ease-out; }
+    [data-theme="dark"] .modal-content { background: #212121; border: 1px solid #333; color: #fff; }
+    .modal-header { padding: 15px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    [data-theme="dark"] .modal-header { border-bottom: 1px solid #333; }
+    .modal-header h3 { margin: 0; font-size: 1.1rem; }
+    .close-x { background: none; border: none; font-size: 24px; cursor: pointer; color: #888; }
+    .modal-body { padding: 20px; }
+    .modal-desc { font-size: 0.9rem; color: #666; margin-bottom: 20px; }
+    [data-theme="dark"] .modal-desc { color: #aaa; }
+    .option-list { display: flex; flex-direction: column; gap: 12px; }
+    .option-item { display: flex; align-items: center; padding: 15px; border: 2px solid #eee; border-radius: 12px; cursor: pointer; transition: 0.2s; position: relative; }
+    [data-theme="dark"] .option-item { border-color: #333; }
+    .option-item:hover { background: rgba(0,0,0,0.02); border-color: #ddd; }
+    [data-theme="dark"] .option-item:hover { background: rgba(255,255,255,0.05); border-color: #444; }
+    .option-item input { position: absolute; opacity: 0; }
+    .option-item input:checked + .option-info + .check-mark { border-color: #f00; background: #f00; }
+    .option-item input:checked + .option-info + .check-mark::after { content: ''; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+    .option-info { flex: 1; display: flex; flex-direction: column; }
+    .option-title { font-weight: bold; font-size: 1rem; }
+    .option-sub { font-size: 0.8rem; color: #777; margin-top: 3px; }
+    .check-mark { width: 22px; height: 22px; border: 2px solid #ddd; border-radius: 50%; position: relative; transition: 0.2s; }
+    .modal-footer { padding: 15px 20px; text-align: right; background: #f9f9f9; }
+    [data-theme="dark"] .modal-footer { background: #1a1a1a; }
+    .modal-close-btn { padding: 8px 20px; border: none; border-radius: 6px; background: #888; color: #fff; cursor: pointer; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 1000px) {
+        .watch-layout { padding: 10px; }
+        .video-title { font-size: 1.1rem; }
+        .rel-thumb { flex: 0 0 140px; }
+    }
+</style>
+{% endblock %}
