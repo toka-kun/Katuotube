@@ -59,9 +59,7 @@ INVIDIOUS_INSTANCES = [
 
 M3U8_API = "https://yudlp.vercel.app/m3u8/"
 STREAM_API = "https://yudlp.vercel.app/stream/stream/"
-EDU_VIDEO_API = "https://siawaseok.duckdns.org/api/video
-TREND_JSON_URL = "https://raw.githubusercontent.com/siawaseok3/wakame/refs/heads/master/trend.json"
-
+EDU_VIDEO_API = "https://siawaseok.duckdns.org/api/video2/"
 
 EDU_PARAM_SOURCES = {
     'siawaseok': {'url': 'https://raw.githubusercontent.com/siawaseok3/wakame/master/video_config.json', 'type': 'json_params'},
@@ -206,25 +204,9 @@ def login():
 @app.route('/')
 @login_required
 def index():
-    # 1. まず高速なGitHubのトレンドJSONを取得（外部APIより圧倒的に速い）
-    videos = None
-    try:
-        # タイムアウトを1秒に絞って、遅延を徹底的に排除
-        res = http_session.get("https://raw.githubusercontent.com/siawaseok3/wakame/refs/heads/master/trend.json", timeout=1.0)
-        if res.status_code == 200:
-            videos = res.json()
-    except Exception:
-        # 取得失敗時はログを出さずに次へ（爆速化のため）
-        pass
-
-    # 2. GitHubが失敗した場合、またはデータが空の場合のみ、従来のInvidious APIを使用
-    if not videos:
-        videos = request_invidious_api("/popular") or []
-
-    # 3. テーマ設定を読み込んでレンダリング
+    videos = request_invidious_api("/popular") or []
     theme = request.cookies.get('theme', 'dark')
     return render_template('home.html', videos=videos, theme=theme)
-
 
 @app.route('/search')
 @login_required
@@ -575,5 +557,4 @@ def snowrider():
     return render_template('snowrider.html')
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=True)
