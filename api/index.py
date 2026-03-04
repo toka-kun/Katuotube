@@ -562,6 +562,10 @@ def padlet_page():
     # Padletページを表示
     return render_template('padlet.html')
 
+@app.route('/block.html')
+def block_blast():
+    return render_template('block.html')
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
