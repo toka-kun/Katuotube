@@ -32,6 +32,7 @@ GAMES_DIR = os.path.join(base_dir, 'games_data')
 if not os.path.exists(GAMES_DIR):
     os.makedirs(GAMES_DIR)
 
+
 app = Flask(__name__, template_folder=template_dir)
 app.config['JSON_AS_ASCII'] = False
 app.secret_key = os.environ.get('SESSION_SECRET', os.environ.get('SECRET_KEY', 'katuotube-key'))
@@ -581,72 +582,58 @@ def block_blast():
 @app.route('/play_hoyo')
 @login_required
 def play_hoyo():
-    """リポジトリ内のhoyo.zipを解凍して実行するルート"""
-    target_zip = os.path.join(base_dir, 'hoyo.zip')
+    # パスがズレるのを防ぐため、複数の候補をチェック
+    possible_paths = [
+        os.path.join(base_dir, 'hoyo.zip'),
+        os.path.join(os.path.dirname(base_dir), 'hoyo.zip')
+    ]
+    
+    target_zip = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            target_zip = p
+            break
+
     game_id = "hoyo"
     game_path = os.path.join(GAMES_DIR, game_id)
 
-    # 1. ZIPの存在確認
-    if not os.path.exists(target_zip):
-        return "エラー: リポジトリのルートに hoyo.zip が見つかりません。", 404
+    if not target_zip:
+        return f"エラー: hoyo.zip が見つかりません。検索したパス: {possible_paths}", 404
 
-    # 2. 解凍処理（フォルダがない場合のみ実行）
+    # 解凍処理
     if not os.path.exists(game_path):
         os.makedirs(game_path, exist_ok=True)
         try:
             with zipfile.ZipFile(target_zip, 'r') as zip_ref:
                 zip_ref.extractall(game_path)
         except Exception as e:
-            return f"解凍エラーが発生しました: {str(e)}", 500
+            return f"解凍エラー: {str(e)}", 500
 
-    # 3. プレイヤー画面へ遷移
     return redirect(url_for('play_game', game_id=game_id))
 
 @app.route('/play_game/<game_id>')
 @login_required
 def play_game(game_id):
-    """ゲームを表示するHTMLプレイヤー"""
-    # ゲーム内の index.html へのURLを生成
-    game_url = url_for('serve_game_files', game_id=game_id, path='index.html')
+    # 解凍先のフォルダ構造を確認（二重フォルダ対策）
+    check_dir = os.path.join(GAMES_DIR, game_id)
+    if not os.path.exists(check_dir):
+        return "ゲームディレクトリが存在しません。", 404
+        
+    inner_files = os.listdir(check_dir)
+    
+    # もしフォルダの中に一つだけフォルダがあり、その中にindex.htmlがある場合の対応
+    if len(inner_files) == 1 and os.path.isdir(os.path.join(check_dir, inner_files[0])):
+        game_url = url_for('serve_game_files', game_id=game_id, path=f"{inner_files[0]}/index.html")
+    else:
+        game_url = url_for('serve_game_files', game_id=game_id, path='index.html')
+        
     return render_template('game_player.html', game_url=game_url, game_id=game_id)
 
 @app.route('/games_content/<game_id>/<path:path>')
 @login_required
 def serve_game_files(game_id, path):
-    """解凍されたゲームファイルをブラウザに配信する"""
+    """解凍された静的ファイルを配信する"""
     return send_from_directory(os.path.join(GAMES_DIR, game_id), path)
-
-@app.route('/upload_game', methods=['POST'])
-@login_required
-def upload_game():
-    """新しいZIPをアップロードして実行する場合のルート"""
-    if 'game_zip' not in request.files:
-        return "ファイルが選択されていません", 400
-    
-    file = request.files['game_zip']
-    if file.filename == '' or not file.filename.endswith('.zip'):
-        return "無効なファイルです（.zipのみ）", 400
-
-    filename = secure_filename(file.filename)
-    game_id = filename.rsplit('.', 1)[0]
-    game_path = os.path.join(GAMES_DIR, game_id)
-
-    if os.path.exists(game_path):
-        shutil.rmtree(game_path)
-    os.makedirs(game_path)
-
-    zip_path = os.path.join(GAMES_DIR, filename)
-    file.save(zip_path)
-    
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(game_path)
-        os.remove(zip_path)
-    except Exception as e:
-        return f"解凍エラー: {str(e)}", 500
-
-    return redirect(url_for('play_game', game_id=game_id))
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
