@@ -21,6 +21,10 @@ from flask import send_from_directory
 from werkzeug.utils import secure_filename
 
 
+# --- [超光速化設定] グローバルエグゼキューター ---
+# リクエストごとにExecutorを生成するオーバーヘッドを排除
+executor = ThreadPoolExecutor(max_workers=100)
+
 # Vercel/Renderのディレクトリ構造に対応するためのパス設定
 base_dir = os.path.dirname(os.path.abspath(__file__))
 template_dir = os.path.join(base_dir, 'templates')
@@ -35,6 +39,7 @@ if not os.path.exists(GAMES_DIR):
 
 app = Flask(__name__, template_folder=template_dir)
 app.config['JSON_AS_ASCII'] = False
+app.config['JSON_SORT_KEYS'] = False # [高速化] JSONのソートを無効化
 app.secret_key = os.environ.get('SESSION_SECRET', os.environ.get('SECRET_KEY', 'katuotube-key'))
 
 # セッション設定
@@ -77,10 +82,12 @@ EDU_PARAM_SOURCES = {
     'kahoot': {'url': 'https://apis.kahoot.it/media-api/youtube/key', 'type': 'kahoot_key'}
 }
 
-# HTTPセッションの設定 (高速化のためプールサイズを拡大)
+# --- [超光速化設定] HTTPセッションの最適化 ---
 http_session = requests.Session()
-retry_strategy = Retry(total=2, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
-adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=50, pool_maxsize=50)
+# リトライ回数を減らし、待ち時間を極小化
+retry_strategy = Retry(total=1, backoff_factor=0.05, status_forcelist=[500, 502, 503, 504])
+# 接続プールを100に拡大。Keep-Aliveを最大限活用してTCPハンドシェイクを省略
+adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=100, pool_maxsize=100)
 http_session.mount("http://", adapter)
 http_session.mount("https://", adapter)
 
@@ -95,10 +102,10 @@ def login_required(f):
     return decorated_function
 
 def get_random_headers():
-    return {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    return {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept-Encoding': 'gzip, deflate'}
 
-@lru_cache(maxsize=128)
-def request_invidious_api(path, timeout=(1.5, 2.5)):
+@lru_cache(maxsize=256) # キャッシュを倍増
+def request_invidious_api(path, timeout=(1.0, 1.8)): # タイムアウトをより厳格に
     # 優先インスタンスを先頭にし、残りをシャッフル
     others = [i for i in INVIDIOUS_INSTANCES if i.rstrip('/') != PRIORITY_INSTANCE.rstrip('/')]
     random.shuffle(others)
@@ -143,34 +150,33 @@ def get_stream_url(video_id, edu_source='siawaseok', video_info=None):
         'education': f"https://www.youtubeeducation.com/embed/{video_id}?{edu_params}"
     }
 
-    # APIリクエストを並列実行して高速化 (タイムアウトを厳格化)
+    # APIリクエストを並列実行して高速化 (グローバルエグゼキューターを使用)
     api_urls = [f"{M3U8_API}{video_id}", f"{STREAM_API}{video_id}"]
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_to_url = {executor.submit(fetch_api_data, url): url for url in api_urls}
-        
-        try:
-            for future in as_completed(future_to_url, timeout=2.5):
-                url = future_to_url[future]
-                data = future.result()
-                if not data: continue
+    future_to_url = {executor.submit(fetch_api_data, url): url for url in api_urls}
+    
+    try:
+        for future in as_completed(future_to_url, timeout=2.0):
+            url = future_to_url[future]
+            data = future.result()
+            if not data: continue
 
-                if M3U8_API in url:
-                    if data.get('m3u8_formats'):
-                        sources['m3u8'] = data['m3u8_formats'][0].get('url')
-                        sources['high'] = sources['m3u8']
-                elif STREAM_API in url:
-                    formats = data.get('formats', [])
-                    itag_18 = next((f.get('url') for f in formats if str(f.get('itag')) == '18'), None)
-                    if itag_18:
-                        sources['primary'] = itag_18
-                    elif formats:
-                        sources['primary'] = formats[0].get('url')
-                    
-                    for f in formats:
-                        if f.get('ext') == 'webm' and not sources['fallback']:
-                            sources['fallback'] = f.get('url')
-        except:
-            pass
+            if M3U8_API in url:
+                if data.get('m3u8_formats'):
+                    sources['m3u8'] = data['m3u8_formats'][0].get('url')
+                    sources['high'] = sources['m3u8']
+            elif STREAM_API in url:
+                formats = data.get('formats', [])
+                itag_18 = next((f.get('url') for f in formats if str(f.get('itag')) == '18'), None)
+                if itag_18:
+                    sources['primary'] = itag_18
+                elif formats:
+                    sources['primary'] = formats[0].get('url')
+                
+                for f in formats:
+                    if f.get('ext') == 'webm' and not sources['fallback']:
+                        sources['fallback'] = f.get('url')
+    except:
+        pass
 
     # 外部APIで失敗した場合、Invidiousのデータを使用
     if not sources['m3u8'] and not sources['primary'] and video_info:
@@ -238,17 +244,16 @@ def watch():
     v_id = request.args.get('v')
     if not v_id: return redirect(url_for('index'))
     
-    # 並列で動画情報とコメントを取得するように修正
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        info_future = executor.submit(request_invidious_api, f"/videos/{v_id}")
-        
-        video_info = info_future.result()
-        if not video_info:
-            try:
-                edu_res = http_session.get(f"{EDU_VIDEO_API}{v_id}", timeout=3)
-                video_info = edu_res.json()
-            except:
-                return redirect(f"/sub/watch?v={v_id}")
+    # グローバルエグゼキューターで並列取得
+    info_future = executor.submit(request_invidious_api, f"/videos/{v_id}")
+    video_info = info_future.result()
+    
+    if not video_info:
+        try:
+            edu_res = http_session.get(f"{EDU_VIDEO_API}{v_id}", timeout=3)
+            video_info = edu_res.json()
+        except:
+            return redirect(f"/sub/watch?v={v_id}")
 
     edu_source = request.cookies.get('edu_source', 'siawaseok')
     sources = get_stream_url(v_id, edu_source, video_info)
@@ -259,10 +264,10 @@ def watch():
     if not sources.get('m3u8') and not sources.get('primary'):
          return redirect(f"/sub/watch?v={v_id}")
 
-    # コメント取得は最後に回し、失敗しても続行
+    # コメント取得
     comments = []
     try:
-        comments_data = request_invidious_api(f"/comments/{v_id}", timeout=(1.0, 1.5))
+        comments_data = request_invidious_api(f"/comments/{v_id}", timeout=(0.8, 1.2))
         if comments_data:
             comments = comments_data.get('comments', [])
     except:
@@ -292,16 +297,14 @@ def thumb_proxy():
 @app.route('/suggest')
 @app.route('/api/suggestions') # 両方のパスに対応させる
 def suggest():
-    # 'keyword' または 'q' の両方のパラメータに対応
     keyword = request.args.get('keyword') or request.args.get('q') or ''
     if not keyword:
         return jsonify([])
         
     try:
-        # タイムアウトを短くしてレスポンスを高速化
         res = http_session.get(
             f"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={urllib.parse.quote(keyword)}", 
-            timeout=1.5 
+            timeout=1.2 
         )
         if res.status_code == 200:
             return jsonify(res.json()[1])
@@ -331,9 +334,8 @@ def proxy():
         return jsonify({"error": "URLを指定してください"}), 400
     
     try:
-        # ユーザーエージェントを偽装してブロックを防ぐ
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(target_url, headers=headers, timeout=10)
+        response = http_session.get(target_url, headers=headers, timeout=10)
         response.raise_for_status()
         return jsonify({"html": response.text})
     except Exception as e:
@@ -341,7 +343,6 @@ def proxy():
 
 @app.route('/history.html')
 def history():
-    # 本来はデータベースから取得しますが、まずはページを表示します
     return render_template('history.html')
 
 @app.route('/settings.html')
@@ -350,17 +351,14 @@ def settings():
 
 @app.route('/game.html')
 def game_list():
-    # ゲーム一覧ページを表示
     return render_template('game.html')
 
 @app.route('/snow.html')
 def snow_game():
-    # Snowゲームの本体ページを表示
     return render_template('snow.html')
 
 @app.route('/2048.html')
 def game_2048():
-    # 2048ゲームの本体ページを表示
     return render_template('2048.html')
 
 @app.route('/link.html')
@@ -373,7 +371,7 @@ def link_checker():
 def downloader():
     return render_template('download.html')
 
-# --- 動画情報を解析して返すAPI (予備機能付き) ---
+# --- 動画情報を解析して返すAPI ---
 @app.route('/api/analyze', methods=['POST'])
 @login_required
 def analyze_video():
@@ -383,11 +381,9 @@ def analyze_video():
     if not video_url:
         return jsonify({"error": "URLを入力してください"}), 400
 
-    # 動画IDを抽出
     video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', video_url)
     video_id = video_id_match.group(1) if video_id_match else None
 
-    # 1. まず yudlp インスタンスを試行
     try:
         api_url = f"https://yudlp.vercel.app/stream/{urllib.parse.quote(video_url, safe='')}"
         res = http_session.get(api_url, timeout=8)
@@ -412,9 +408,8 @@ def analyze_video():
                 "formats": formats[::-1]
             })
     except Exception:
-        pass # 失敗した場合は次のステップへ
+        pass
 
-    # 2. Invidious インスタンスを試行 (yt.omada.cafe, inv.nadeko.net)
     if video_id:
         fallback_instances = ["https://yt.omada.cafe", "https://inv.nadeko.net"]
         for instance in fallback_instances:
@@ -425,9 +420,6 @@ def analyze_video():
                 if res.status_code == 200:
                     inv_data = res.json()
                     formats = []
-                    
-                    # Invidiousの形式を統合
-                    # formatStreams (動画+音声)
                     for f in inv_data.get('formatStreams', []):
                         formats.append({
                             'url': f.get('url'),
@@ -436,7 +428,6 @@ def analyze_video():
                             'size': '不明',
                             'type': '🎬 動画'
                         })
-                    # adaptiveFormats (高画質/音声のみ)
                     for f in inv_data.get('adaptiveFormats', []):
                         is_audio = f.get('type', '').startswith('audio/')
                         formats.append({
@@ -459,7 +450,7 @@ def analyze_video():
     return jsonify({"error": "すべてのインスタンスで取得に失敗しました。時間をおいて試してください。"}), 500
 
 
-# --- 追加：高画質再生ルート（修正版） ---
+# --- 高画質再生ルート ---
 @app.route('/high')
 @login_required
 def high_quality_watch():
@@ -467,9 +458,7 @@ def high_quality_watch():
     if not v_id:
         return redirect(url_for('index'))
 
-    # 設定の読み込み (デフォルトは hls)
     preferred_mode = request.cookies.get('player_mode', 'hls')
-
     target_instance = "https://yt.omada.cafe"
     video_info = None
 
@@ -493,10 +482,9 @@ def high_quality_watch():
     video_url = None
     audio_url = None
 
-    for res in ["2160p", "1440p", "1080p", "720p"]:
-        v_stream = next((f for f in adaptive if f.get("resolution") == res and "video" in f.get("type", "")), None)
+    for res_label in ["2160p", "1440p", "1080p", "720p"]:
+        v_stream = next((f for f in adaptive if f.get("resolution") == res_label and "video" in f.get("type", "")), None)
         if v_stream:
-            # quoteを使用してURLエンコードを行い、プロキシを確実に通す
             video_url = f"/proxy/video?url={quote(v_stream.get('url'))}"
             break
 
@@ -505,14 +493,12 @@ def high_quality_watch():
     if a_stream and isinstance(a_stream, dict):
         audio_url = f"/proxy/video?url={quote(a_stream.get('url'))}"
 
-    # HLS(m3u8)の取得ロジック
     m3u8_url = None
     try:
-        hls_res = requests.get(f"https://yudlp.vercel.app/m3u8/{v_id}", timeout=10)
+        hls_res = http_session.get(f"https://yudlp.vercel.app/m3u8/{v_id}", timeout=10)
         hls_data = hls_res.json()
         m3u8_formats = hls_data.get("m3u8_formats", [])
         if m3u8_formats:
-            # 解像度（高さ）でソートして最高画質を取得
             sorted_formats = sorted(
                 m3u8_formats,
                 key=lambda x: int(x.get("resolution", "0x0").split("x")[-1] if "x" in x.get("resolution", "") else 0),
@@ -520,7 +506,6 @@ def high_quality_watch():
             )
             m3u8_url = sorted_formats[0].get("url")
     except Exception:
-        # 取得失敗時は base_sources の m3u8 をフォールバックとして使用
         m3u8_url = base_sources.get('m3u8')
 
     return render_template('high.html', 
@@ -549,18 +534,11 @@ def paperio_game():
 @app.route('/channel/<cid>')
 @login_required
 def channel(cid):
-    # APIからデータを取得
     channel_info = request_invidious_api(f"/channels/{cid}")
     if not channel_info:
         return "チャンネルが見つかりません", 404
-    
-    # チャンネル内の最新動画を取得
     videos = channel_info.get('latestVideos', [])
-    
-    # ダークモード設定の有無を確認（テンプレート側のJSと連動）
-    return render_template('channel.html', 
-                           channel=channel_info, 
-                           videos=videos)
+    return render_template('channel.html', channel=channel_info, videos=videos)
 
 @app.route('/contact.html')
 @login_required
@@ -584,7 +562,6 @@ def snowrider():
 @app.route('/padlet.html')
 @login_required
 def padlet_page():
-    # Padletページを表示
     return render_template('padlet.html')
 
 @app.route('/block.html')
@@ -596,25 +573,19 @@ def block_blast():
 @app.route('/play_hoyo')
 @login_required
 def play_hoyo():
-    # パスがズレるのを防ぐため、複数の候補をチェック
     possible_paths = [
         os.path.join(base_dir, 'hoyo.zip'),
         os.path.join(os.path.dirname(base_dir), 'hoyo.zip')
     ]
-    
     target_zip = None
     for p in possible_paths:
         if os.path.exists(p):
             target_zip = p
             break
-
     game_id = "hoyo"
     game_path = os.path.join(GAMES_DIR, game_id)
-
     if not target_zip:
-        return f"エラー: hoyo.zip が見つかりません。検索したパス: {possible_paths}", 404
-
-    # 解凍処理
+        return f"エラー: hoyo.zip が見つかりません。", 404
     if not os.path.exists(game_path):
         os.makedirs(game_path, exist_ok=True)
         try:
@@ -622,39 +593,31 @@ def play_hoyo():
                 zip_ref.extractall(game_path)
         except Exception as e:
             return f"解凍エラー: {str(e)}", 500
-
     return redirect(url_for('play_game', game_id=game_id))
 
 @app.route('/play_game/<game_id>')
 @login_required
 def play_game(game_id):
-    # 解凍先のフォルダ構造を確認（二重フォルダ対策）
     check_dir = os.path.join(GAMES_DIR, game_id)
     if not os.path.exists(check_dir):
         return "ゲームディレクトリが存在しません。", 404
-        
     inner_files = os.listdir(check_dir)
-    
-    # もしフォルダの中に一つだけフォルダがあり、その中にindex.htmlがある場合の対応
     if len(inner_files) == 1 and os.path.isdir(os.path.join(check_dir, inner_files[0])):
         game_url = url_for('serve_game_files', game_id=game_id, path=f"{inner_files[0]}/index.html")
     else:
         game_url = url_for('serve_game_files', game_id=game_id, path='index.html')
-        
     return render_template('game_player.html', game_url=game_url, game_id=game_id)
 
 @app.route('/games_content/<game_id>/<path:path>')
 @login_required
 def serve_game_files(game_id, path):
-    """解凍された静的ファイルを配信する"""
     return send_from_directory(os.path.join(GAMES_DIR, game_id), path)
 
 @app.route('/github')
 def github_tool():
-    # URLパラメータ 'url' から共有されたGitHubのURLを取得（空の場合は空文字）
     shared_url = request.args.get('url', '')
-    # templates/github.html をレンダリングし、パラメータを渡す
     return render_template('github.html', shared_url=shared_url)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # threaded=True でマルチスレッドを有効化
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
