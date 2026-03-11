@@ -181,6 +181,9 @@
             sources.embed = `https://www.youtube-nocookie.com/embed/{{ video_id or video.videoId }}?autoplay=1`;
             document.getElementById('opt-nocookie').checked = true;
         }
+        
+        // 即座に反映させるためにisChangingModeを一時的に解除して呼び出し
+        isChangingMode = false; 
         changeMode('embed');
         setTimeout(closeEmbedSelector, 300);
     }
@@ -220,6 +223,7 @@
             videoPlayer.src = "";
             videoPlayer.style.display = 'none';
             embedPlayer.style.display = 'block';
+            // iframeのキャッシュを回避して確実にリロードするためにURLを再設定
             embedPlayer.src = url;
             isChangingMode = false;
             return;
