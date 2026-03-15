@@ -506,16 +506,26 @@ def high_quality_watch():
     video_url = None
     audio_url = None
 
+    # 映像ストリームの選定: 解像度の高い順、かつfpsの高い順にスキャン
     for res_label in ["2160p", "1440p", "1080p", "720p"]:
-        v_stream = next((f for f in adaptive if f.get("resolution") == res_label and "video" in f.get("type", "")), None)
-        if v_stream:
+        # 同じ解像度の中でfpsが最も高いものを優先して抽出
+        v_streams = [f for f in adaptive if f.get("resolution") == res_label and "video" in f.get("type", "")]
+        if v_streams:
+            # fpsで降順ソートして先頭を取得
+            v_stream = sorted(v_streams, key=lambda x: int(x.get("fps", 0)), reverse=True)[0]
             video_url = f"/proxy/video?url={quote(v_stream.get('url'))}"
             break
 
-    a_stream = next((f for f in adaptive if f.get("audioQuality") == "AUDIO_QUALITY_MEDIUM"), 
-                    next((f for f in adaptive if "audio" in f.get("type", "")), None))
-    if a_stream and isinstance(a_stream, dict):
-        audio_url = f"/proxy/video?url={quote(a_stream.get('url'))}"
+    # 音声ストリームの選定: 音質が最も良い（ビットレートが高い）ものを優先
+    a_streams = [f for f in adaptive if "audio" in f.get("type", "")]
+    if a_streams:
+        # まずMEDIUM品質を探し、なければビットレート順でソートして取得
+        a_stream_best = next((f for f in a_streams if f.get("audioQuality") == "AUDIO_QUALITY_MEDIUM"), None)
+        if not a_stream_best:
+            a_stream_best = sorted(a_streams, key=lambda x: int(x.get("bitrate", 0)), reverse=True)[0]
+        
+        if a_stream_best and isinstance(a_stream_best, dict):
+            audio_url = f"/proxy/video?url={quote(a_stream_best.get('url'))}"
 
     m3u8_url = None
     try:
