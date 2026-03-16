@@ -652,6 +652,11 @@ def github_tool():
     shared_url = request.args.get('url', '')
     return render_template('github.html', shared_url=shared_url)
 
+@app.route('/instagram)
+def insta_game():
+    # templatesフォルダ内のinstagramgame.htmlを読み込む
+    return render_template('instagramgame.html')
+
 if __name__ == '__main__':
     # threaded=True でマルチスレッドを有効化
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
