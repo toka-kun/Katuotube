@@ -700,6 +700,10 @@ def video_proxy():
     except Exception as e:
         return str(e), 500
 
+@app.route('/helios.html')
+def helios_proxy():
+    return render_template('helios.html')
+
 if __name__ == '__main__':
     # threaded=True でマルチスレッドを有効化
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
